@@ -9,10 +9,10 @@ const http = require('http');
 
 // ========== CONFIGURATION ==========
 const CONFIG = {
-  // Use Environment Variables on Render! Hardcoding tokens is a security risk.
-  DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN || 'MTQ0NTA4MDQyOTI4NjkyMDI5Ng.GnxhwP.jllPBIwHtDjgamnycQyX_T_Ak2dEO0kHtRELRM',
+  // Pulling secrets securely from Render Environment Variables
+  DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SIM_WORKFLOW_URL: 'https://api.simstudio.ai/api/workflows/ac90911a-946f-40f3-a737-6a2b8c7e1753/run',
-  SIM_API_KEY: process.env.SIM_API_KEY || 'khz7X8xzGvcdQUXd6r8VL',
+  SIM_API_KEY: process.env.SIM_API_KEY,
   SERVER_ID: '1483182660980314124',
   VERIFICATION_CHANNEL_ID: '1483733393660317697',
   VERIFIED_ROLE_ID: '1483330390918959216',
