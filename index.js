@@ -1,11 +1,11 @@
 // ============================================
 // 🕯️ CANDLE VERIFICATION BOT - Render Deploy
 // ============================================
-// Ready to paste into your GitHub repo as index.js
-// Deploy on Render as a Background Worker (free)
+// Deploy on Render as a FREE Web Service
 // ============================================
 
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const http = require('http');
 
 // ========== CONFIGURATION ==========
 const CONFIG = {
@@ -27,8 +27,6 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
-// Track verification sessions
-// { userId: { messageIds: [], phase: 'waiting'|'verifying'|'done' } }
 const sessions = new Map();
 
 client.on('ready', () => {
@@ -41,15 +39,11 @@ client.on('ready', () => {
 client.on('guildMemberAdd', async (member) => {
   if (member.guild.id !== CONFIG.SERVER_ID) return;
   console.log(`🆕 New member: ${member.user.tag} (${member.id})`);
-
   sessions.set(member.id, { messageIds: [], phase: 'waiting' });
-
-  // Post a nudge in verification channel
   try {
     const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
     const welcomeMsg = await channel.send(
-      `🕯️ <@${member.id}> A new soul approaches the flame... ` +
-      `**Tag me or say something here to begin your verification!** ✨`
+      `🕯️ <@${member.id}> A new soul approaches the flame... **Tag me or say something here to begin your verification!** ✨`
     );
     sessions.get(member.id).messageIds.push(welcomeMsg.id);
   } catch (e) {
@@ -65,18 +59,14 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const username = message.author.username;
 
-  // Initialize session if not tracked
   if (!sessions.has(userId)) {
     sessions.set(userId, { messageIds: [], phase: 'waiting' });
   }
 
   const session = sessions.get(userId);
   if (session.phase === 'done') return;
-
-  // Track message for cleanup
   session.messageIds.push(message.id);
 
-  // First interaction or follow-up?
   const isFirst = session.phase === 'waiting';
   session.phase = 'verifying';
 
@@ -86,7 +76,6 @@ client.on('messageCreate', async (message) => {
 
   console.log(`💬 ${message.author.tag}: ${message.content}`);
 
-  // Call the Sim workflow
   try {
     const response = await fetch(CONFIG.SIM_WORKFLOW_URL, {
       method: 'POST',
@@ -103,6 +92,62 @@ client.on('messageCreate', async (message) => {
       }),
     });
 
+    const data = await response.json();
+    const botResponse = data?.result?.content || '';
+    console.log(`✅ Workflow response: ${botResponse.substring(0, 150)}`);
+
+    const toolCalls = data?.result?.toolCalls || [];
+    for (const call of toolCalls) {
+      if (call?.result?.data?.id) {
+        session.messageIds.push(call.result.data.id);
+      }
+    }
+
+    if (botResponse.includes('DECISION: VERIFY') ||
+        botResponse.includes('DECISION: KICK') ||
+        botResponse.includes('DECISION: REJECT')) {
+      session.phase = 'done';
+      const decision = botResponse.match(/DECISION: (\w+)/)?.[1];
+      console.log(`🏁 Verification complete for ${userId}: ${decision}`);
+
+      setTimeout(async () => {
+        try {
+          const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
+          const msgIds = session.messageIds.filter(id => id);
+          if (msgIds.length > 0) {
+            await channel.bulkDelete(msgIds).catch(() => {
+              msgIds.forEach(async (id) => {
+                try { await channel.messages.delete(id); } catch(e) {}
+              });
+            });
+            console.log(`🧹 Cleaned up ${msgIds.length} messages for ${userId}`);
+          }
+        } catch (e) {
+          console.error('⚠️ Cleanup error:', e.message);
+        }
+        sessions.delete(userId);
+      }, 10000);
+    }
+  } catch (error) {
+    console.error('❌ Error calling workflow:', error.message);
+  }
+});
+
+// ========== WEB SERVER (keeps Render free tier alive) ==========
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('🕯️ Candle Guardian is alive');
+}).listen(PORT, () => {
+  console.log(`🌐 Health server running on port ${PORT}`);
+});
+
+// Ping ourselves every 14 minutes to prevent Render from sleeping
+setInterval(() => {
+  fetch(`https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}:${PORT}`).catch(() => {});
+}, 14 * 60 * 1000);
+
+client.login(CONFIG.DISCORD_BOT_TOKEN);
     const data = await response.json();
     const botResponse = data?.result?.content || '';
     console.log(`✅ Workflow response: ${botResponse.substring(0, 150)}`);
