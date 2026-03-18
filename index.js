@@ -9,6 +9,7 @@ const http = require('http');
 
 // ========== CONFIGURATION ==========
 const CONFIG = {
+  // Use Environment Variables on Render! Hardcoding tokens is a security risk.
   DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN || 'MTQ0NTA4MDQyOTI4NjkyMDI5Ng.GnxhwP.jllPBIwHtDjgamnycQyX_T_Ak2dEO0kHtRELRM',
   SIM_WORKFLOW_URL: 'https://api.simstudio.ai/api/workflows/ac90911a-946f-40f3-a737-6a2b8c7e1753/run',
   SIM_API_KEY: process.env.SIM_API_KEY || 'khz7X8xzGvcdQUXd6r8VL',
@@ -115,6 +116,7 @@ client.on('messageCreate', async (message) => {
           const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
           const msgIds = session.messageIds.filter(id => id);
           if (msgIds.length > 0) {
+            // Bulk delete only works for messages under 14 days old
             await channel.bulkDelete(msgIds).catch(() => {
               msgIds.forEach(async (id) => {
                 try { await channel.messages.delete(id); } catch(e) {}
@@ -142,67 +144,15 @@ http.createServer((req, res) => {
   console.log(`🌐 Health server running on port ${PORT}`);
 });
 
-// Ping ourselves every 14 minutes to prevent Render from sleeping
-setInterval(() => {
-  fetch(`https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}:${PORT}`).catch(() => {});
+// FIXED: Added 'async' to the interval callback to allow 'fetch' usage
+setInterval(async () => {
+  try {
+    const host = process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost';
+    // If on Render, we just want to hit our own health endpoint
+    await fetch(`http://${host}:${PORT}`).catch(() => {});
+  } catch (e) {
+    // Ignore errors for the self-ping
+  }
 }, 14 * 60 * 1000);
 
 client.login(CONFIG.DISCORD_BOT_TOKEN);
-    const data = await response.json();
-    const botResponse = data?.result?.content || '';
-    console.log(`✅ Workflow response: ${botResponse.substring(0, 150)}`);
-
-    // Track bot messages from tool calls for cleanup
-    const toolCalls = data?.result?.toolCalls || [];
-    for (const call of toolCalls) {
-      if (call?.result?.data?.id) {
-        session.messageIds.push(call.result.data.id);
-      }
-    }
-
-    // Check if verification is complete
-    if (botResponse.includes('DECISION: VERIFY') ||
-        botResponse.includes('DECISION: KICK') ||
-        botResponse.includes('DECISION: REJECT')) {
-
-      session.phase = 'done';
-      const decision = botResponse.match(/DECISION: (\w+)/)?.[1];
-      console.log(`🏁 Verification complete for ${userId}: ${decision}`);
-
-      // Clean up messages after 10 seconds
-      setTimeout(async () => {
-        try {
-          const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
-          const msgIds = session.messageIds.filter(id => id);
-          if (msgIds.length > 0) {
-            await channel.bulkDelete(msgIds).catch(() => {
-              msgIds.forEach(async (id) => {
-                try { await channel.messages.delete(id); } catch(e) {}
-              });
-            });
-            console.log(`🧹 Cleaned up ${msgIds.length} messages for ${userId}`);
-          }
-        } catch (e) {
-          console.error('⚠️ Cleanup error:', e.message);
-        }
-        sessions.delete(userId);
-      }, 10000);
-    }
-  } catch (error) {
-    console.error('❌ Error calling workflow:', error.message);
-  }
-});
-
-// ========== KEEP-ALIVE (for Render free tier) ==========
-// Render free web services sleep after 15min of no HTTP traffic.
-// If you deploy as a "Background Worker" this isn't needed.
-// If you deploy as a "Web Service", uncomment below:
-//
-// const http = require('http');
-// http.createServer((req, res) => {
-//   res.writeHead(200);
-//   res.end('🕯️ Candle Guardian is alive');
-// }).listen(process.env.PORT || 3000);
-
-client.login(CONFIG.DISCORD_BOT_TOKEN);
-
