@@ -1,15 +1,11 @@
 // ============================================
 // 🕯️ CANDLE VERIFICATION BOT - Render Deploy
 // ============================================
-// Deploy on Render as a FREE Web Service
-// ============================================
-
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const http = require('http');
 
 // ========== CONFIGURATION ==========
 const CONFIG = {
-  // Pulling secrets securely from Render Environment Variables
   DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SIM_WORKFLOW_URL: 'https://api.simstudio.ai/api/workflows/ac90911a-946f-40f3-a737-6a2b8c7e1753/run',
   SIM_API_KEY: process.env.SIM_API_KEY,
@@ -23,7 +19,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.MessageContent, // This requires the toggle in the Developer Portal!
   ],
   partials: [Partials.Message, Partials.Channel],
 });
@@ -32,14 +28,11 @@ const sessions = new Map();
 
 client.on('ready', () => {
   console.log(`🕯️ Candle Guardian relay online as ${client.user.tag}`);
-  console.log(`📡 Forwarding to: ${CONFIG.SIM_WORKFLOW_URL}`);
-  console.log(`🔥 Verification channel: ${CONFIG.VERIFICATION_CHANNEL_ID}`);
 });
 
 // ========== NEW MEMBER JOINS ==========
 client.on('guildMemberAdd', async (member) => {
   if (member.guild.id !== CONFIG.SERVER_ID) return;
-  console.log(`🆕 New member: ${member.user.tag} (${member.id})`);
   sessions.set(member.id, { messageIds: [], phase: 'waiting' });
   try {
     const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
@@ -97,6 +90,12 @@ client.on('messageCreate', async (message) => {
     const botResponse = data?.result?.content || '';
     console.log(`✅ Workflow response: ${botResponse.substring(0, 150)}`);
 
+    // 🔥 THE FIX: Actually send the AI's response back to Discord!
+    if (botResponse && !botResponse.includes('DECISION:')) {
+      const replyMsg = await message.reply(botResponse);
+      session.messageIds.push(replyMsg.id); // Save ID so it can clean it up later
+    }
+
     const toolCalls = data?.result?.toolCalls || [];
     for (const call of toolCalls) {
       if (call?.result?.data?.id) {
@@ -108,21 +107,14 @@ client.on('messageCreate', async (message) => {
         botResponse.includes('DECISION: KICK') ||
         botResponse.includes('DECISION: REJECT')) {
       session.phase = 'done';
-      const decision = botResponse.match(/DECISION: (\w+)/)?.[1];
-      console.log(`🏁 Verification complete for ${userId}: ${decision}`);
+      console.log(`🏁 Verification complete for ${userId}`);
 
       setTimeout(async () => {
         try {
           const channel = await client.channels.fetch(CONFIG.VERIFICATION_CHANNEL_ID);
           const msgIds = session.messageIds.filter(id => id);
           if (msgIds.length > 0) {
-            // Bulk delete only works for messages under 14 days old
-            await channel.bulkDelete(msgIds).catch(() => {
-              msgIds.forEach(async (id) => {
-                try { await channel.messages.delete(id); } catch(e) {}
-              });
-            });
-            console.log(`🧹 Cleaned up ${msgIds.length} messages for ${userId}`);
+            await channel.bulkDelete(msgIds).catch(() => {});
           }
         } catch (e) {
           console.error('⚠️ Cleanup error:', e.message);
@@ -135,24 +127,18 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// ========== WEB SERVER (keeps Render free tier alive) ==========
+// ========== WEB SERVER ==========
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end('🕯️ Candle Guardian is alive');
-}).listen(PORT, () => {
-  console.log(`🌐 Health server running on port ${PORT}`);
-});
+}).listen(PORT);
 
-// FIXED: Added 'async' to the interval callback to allow 'fetch' usage
 setInterval(async () => {
   try {
     const host = process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost';
-    // If on Render, we just want to hit our own health endpoint
     await fetch(`http://${host}:${PORT}`).catch(() => {});
-  } catch (e) {
-    // Ignore errors for the self-ping
-  }
+  } catch (e) {}
 }, 14 * 60 * 1000);
 
 client.login(CONFIG.DISCORD_BOT_TOKEN);
